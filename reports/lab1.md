@@ -1,44 +1,10 @@
-//! Task management implementation
-//!
-//! Everything about task management, like starting and switching tasks is
-//! implemented here.
-//!
-//! A single global instance of [`TaskManager`] called `TASK_MANAGER` controls
-//! all the tasks in the operating system.
-//!
-//! Be careful when you see `__switch` ASM function in `switch.S`. Control flow around this function
-//! might not be what you expect.
+# LAB 1 实验总结
 
-mod context;
-mod switch;
-#[allow(clippy::module_inception)]
-mod task;
+在本实验中要求记录syscall的调用次数
 
-use crate::config::{MAX_APP_NUM, MAX_SYSCALL_NUM};
-use crate::loader::{get_num_app, init_app_cx};
-use crate::sync::UPSafeCell;
-use lazy_static::*;
-use switch::__switch;
-pub use task::{TaskControlBlock, TaskStatus, TaskInfo};
+核心思路是扩展`TaskManager`
 
-pub use context::TaskContext;
-
-/// The task manager, where all the tasks are managed.
-///
-/// Functions implemented on `TaskManager` deals with all task state transitions
-/// and task context switching. For convenience, you can find wrappers around it
-/// in the module level.
-///
-/// Most of `TaskManager` are hidden behind the field `inner`, to defer
-/// borrowing checks to runtime. You can see examples on how to use `inner` in
-/// existing functions on `TaskManager`.
-pub struct TaskManager {
-    /// total number of tasks
-    num_app: usize,
-    /// use inner value to get mutable access
-    inner: UPSafeCell<TaskManagerInner>,
-}
-
+```rust
 /// Inner of Task Manager
 pub struct TaskManagerInner {
     /// task list
@@ -48,7 +14,11 @@ pub struct TaskManagerInner {
 
     task_info_map: [TaskInfo; MAX_APP_NUM],
 }
+```
 
+添加初始化
+
+```rust
 lazy_static! {
     /// Global variable: TASK_MANAGER
     pub static ref TASK_MANAGER: TaskManager = {
@@ -77,7 +47,11 @@ lazy_static! {
         }
     };
 }
+```
 
+扩充函数支持
+
+```rust
 impl TaskManager {
     /// Run the first task in task list.
     ///
@@ -156,40 +130,9 @@ impl TaskManager {
     }
 
 }
+```
 
-/// Run the first task in task list.
-pub fn run_first_task() {
-    TASK_MANAGER.run_first_task();
-}
-
-/// Switch current `Running` task to the task we have found,
-/// or there is no `Ready` task and we can exit with all applications completed
-fn run_next_task() {
-    TASK_MANAGER.run_next_task();
-}
-
-/// Change the status of current `Running` task into `Ready`.
-fn mark_current_suspended() {
-    TASK_MANAGER.mark_current_suspended();
-}
-
-/// Change the status of current `Running` task into `Exited`.
-fn mark_current_exited() {
-    TASK_MANAGER.mark_current_exited();
-}
-
-/// Suspend the current 'Running' task and run the next task in task list.
-pub fn suspend_current_and_run_next() {
-    mark_current_suspended();
-    run_next_task();
-}
-
-/// Exit the current 'Running' task and run the next task in task list.
-pub fn exit_current_and_run_next() {
-    mark_current_exited();
-    run_next_task();
-}
-
+```rust
 /// increment syscall count of current task
 pub fn inc_current_syscall_count(syscall_id: usize) {
     TASK_MANAGER.inc_current_syscall_count(syscall_id);
@@ -200,3 +143,66 @@ pub fn inc_current_syscall_count(syscall_id: usize) {
 pub fn get_current_syscall_count(syscall_id: usize) -> usize {
     TASK_MANAGER.get_current_syscall_count(syscall_id)
 }
+```
+
+修改syscall
+
+```rust
+/// handle syscall exception with `syscall_id` and other arguments
+pub fn syscall(syscall_id: usize, args: [usize; 3]) -> isize {
+    inc_current_syscall_count(syscall_id);
+
+    let res= match syscall_id {
+        SYSCALL_WRITE => {
+            sys_write(args[0], args[1] as *const u8, args[2])
+        },
+        SYSCALL_EXIT => {
+            sys_exit(args[0] as i32)
+        },
+        SYSCALL_YIELD => {
+            sys_yield()
+        },
+        SYSCALL_GET_TIME => {
+            sys_get_time(args[0] as *mut TimeVal, args[1])
+        },
+
+        SYSCALL_TRACE => {
+            sys_trace(args[0], args[1], args[2])
+        }
+
+        _ => panic!("Unsupported syscall_id: {}", syscall_id),
+    };
+
+    res
+}
+
+```
+
+完成sys_trace:
+
+```rust
+pub fn sys_trace(_trace_request: usize, _id: usize, _data: usize) -> isize {
+    trace!("kernel: sys_trace");
+
+    match _trace_request {
+        0 => {
+            let addr = _id as *const u8;
+            let data = unsafe { *addr };
+            data as isize
+        }
+
+        1 => {
+            let addr = _id as *mut u8;
+            unsafe { *addr = _data as u8 }
+            0
+        }
+
+        2 => {
+            get_current_syscall_count(_id) as isize
+        }
+
+        _ => -1,
+    }
+}
+```
+
