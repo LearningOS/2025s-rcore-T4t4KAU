@@ -15,14 +15,18 @@ mod switch;
 mod task;
 
 use crate::loader::{get_app_data, get_num_app};
+use crate::mm::{MapPermission, PTEFlags, PhysPageNum, VirtAddr, VirtPageNum};
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
 use alloc::vec::Vec;
 use lazy_static::*;
 use switch::__switch;
+use task::TaskInfo;
 pub use task::{TaskControlBlock, TaskStatus};
 
 pub use context::TaskContext;
+
+use crate::config::MAX_SYSCALL_NUM;
 
 /// The task manager, where all the tasks are managed.
 ///
@@ -46,6 +50,8 @@ struct TaskManagerInner {
     tasks: Vec<TaskControlBlock>,
     /// id of current `Running` task
     current_task: usize,
+
+    task_info_map: Vec<TaskInfo>
 }
 
 lazy_static! {
@@ -55,8 +61,12 @@ lazy_static! {
         let num_app = get_num_app();
         println!("num_app = {}", num_app);
         let mut tasks: Vec<TaskControlBlock> = Vec::new();
+        let mut task_info_map: Vec<TaskInfo> = Vec::new();
         for i in 0..num_app {
             tasks.push(TaskControlBlock::new(get_app_data(i), i));
+            task_info_map.push(TaskInfo {
+                syscall_count: [0; MAX_SYSCALL_NUM],
+            });
         }
         TaskManager {
             num_app,
@@ -64,6 +74,7 @@ lazy_static! {
                 UPSafeCell::new(TaskManagerInner {
                     tasks,
                     current_task: 0,
+                    task_info_map
                 })
             },
         }
@@ -153,6 +164,81 @@ impl TaskManager {
             panic!("All applications completed!");
         }
     }
+
+    fn inc_current_syscall_count(&self, syscall_id: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.task_info_map[current].syscall_count[syscall_id] += 1;
+    }
+
+    fn get_current_syscall_count(&self, syscall_id: usize) -> usize {
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.task_info_map[current].syscall_count[syscall_id]
+    }
+
+    fn check_vpn_readable(&self, vpn: VirtPageNum) -> bool {
+        let inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+        
+        inner.tasks[cur].memory_set.check_vpn_readable(vpn)
+    }
+
+    fn check_vpn_writable(&self, vpn: VirtPageNum) -> bool {
+        let inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+
+        inner.tasks[cur].memory_set.check_vpn_writable(vpn)
+    }
+
+    fn alloc_free_page(&self, vpn: VirtPageNum, ppn: PhysPageNum, flags: PTEFlags) {
+        let mut inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+
+        inner.tasks[cur].memory_set.alloc_free_page(vpn, ppn, flags);
+    }
+
+    fn dealloc_free_page(&self, vpn: VirtPageNum) {
+        let mut inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+
+        inner.tasks[cur].memory_set.dealloc_free_page(vpn);
+    }
+
+    fn map_pages(&self, _start: VirtAddr, page_num: usize, _perm: MapPermission) {
+        let mut inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+
+        inner.tasks[cur].memory_set.map_pages(_start, page_num, _perm);
+    }
+
+    fn unmap_one_page(&self, vpn: VirtPageNum) {
+        let mut inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+
+        inner.tasks[cur].memory_set.unmap_one_page(vpn);
+    }
+
+    fn check_page_mapped(&self, vpn: VirtPageNum) -> bool {
+        let inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+
+        inner.tasks[cur].memory_set.check_page_mapped(vpn)
+    }
+
+    fn write_byte_to_page(&self, addr: VirtAddr, data: u8) {
+        let inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+
+        inner.tasks[cur].memory_set.write_byte_to_page(addr, data);
+    }
+
+    fn read_byte_from_page(&self, addr: VirtAddr) -> isize {
+        let inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+
+        inner.tasks[cur].memory_set.read_byte_from_page(addr)
+    }
 }
 
 /// Run the first task in task list.
@@ -201,4 +287,59 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 /// Change the current 'Running' task's program break
 pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
+}
+
+/// increment syscall count of current task
+pub fn inc_current_syscall_count(syscall_id: usize) {
+    TASK_MANAGER.inc_current_syscall_count(syscall_id);
+}
+
+/// get current task's syscall count
+pub fn get_current_syscall_count(syscall_id: usize) -> usize {
+    TASK_MANAGER.get_current_syscall_count(syscall_id)
+}
+
+/// check virtual address if readable
+pub fn check_vpn_readable(vpn: VirtPageNum) -> bool {
+    TASK_MANAGER.check_vpn_readable(vpn)
+}
+
+/// check virtual address if writable 
+pub fn check_vpn_writable(vpn: VirtPageNum) -> bool {
+    TASK_MANAGER.check_vpn_writable(vpn)
+}
+
+/// alloc_free_page
+pub fn alloc_free_page(vpn: VirtPageNum, ppn: PhysPageNum, flags: PTEFlags) {
+    TASK_MANAGER.alloc_free_page(vpn, ppn, flags);
+}
+
+///
+pub fn dealloc_free_page(vpn: VirtPageNum) {
+    TASK_MANAGER.dealloc_free_page(vpn);
+}
+
+/// check virtual page if mapped
+pub fn check_page_mapped(vpn: VirtPageNum) -> bool {
+    TASK_MANAGER.check_page_mapped(vpn)
+}
+
+/// write one byte to page
+pub fn write_byte_to_page(addr: VirtAddr, data: u8) {
+    TASK_MANAGER.write_byte_to_page(addr, data);
+}
+
+/// read one byte from page
+pub fn read_byte_from_page(addr: VirtAddr) -> isize {
+    TASK_MANAGER.read_byte_from_page(addr)
+}
+
+/// map memory pages
+pub fn map_memory_pages(start_va: VirtAddr, page_num: usize, map_perm: MapPermission) {
+    TASK_MANAGER.map_pages(start_va, page_num, map_perm);
+}
+
+/// unmap one memory page
+pub fn unmap_one_memory_page(vpn: VirtPageNum) {
+    TASK_MANAGER.unmap_one_page(vpn);
 }

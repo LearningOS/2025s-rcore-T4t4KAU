@@ -1,5 +1,7 @@
 //! Implementation of [`PageTableEntry`] and [`PageTable`].
 
+use crate::config::{PAGE_SIZE, PAGE_SIZE_BITS};
+
 use super::{frame_alloc, FrameTracker, PhysPageNum, StepByOne, VirtAddr, VirtPageNum};
 use alloc::vec;
 use alloc::vec::Vec;
@@ -154,6 +156,62 @@ impl PageTable {
     /// get the token from the page table
     pub fn token(&self) -> usize {
         8usize << 60 | self.root_ppn.0
+    }
+
+    /// check vpn if exists
+    pub fn check_vpn_mapped(&self, vpn: VirtPageNum) -> bool {
+        if let Some(pte)= self.find_pte(vpn) {
+            return pte.is_valid();
+        } else {
+            return false;
+        }
+    }
+
+    /// check vpn if readable
+    pub fn check_vpn_readable(&self, vpn: VirtPageNum) -> bool {
+        if let Some(pte) = self.find_pte(vpn) {
+            return pte.readable();
+        } else {
+            return false;
+        }
+    }
+
+    /// check vpn if writable
+    pub fn check_vpn_writable(&self, vpn: VirtPageNum) -> bool {        
+        if let Some(pte) = self.find_pte(vpn) {
+            return pte.writable();
+        } else {
+            return false;
+        }
+    }
+
+    /// write one byte to page
+    pub fn write_byte_to_page(&self, addr: VirtAddr, data: u8) {
+        let vpn: VirtPageNum = (addr.0 / PAGE_SIZE).into();
+        let offset = addr.0 & ((0x1 << PAGE_SIZE_BITS) - 1);
+        if let Some(pte) = self.find_pte(vpn) {
+            if !pte.writable() {
+                return;
+            }
+            pte.ppn().get_bytes_array()[offset] = data;
+        }
+    }
+
+    /// read one byte from page
+    pub fn read_byte_from_page(&self, addr: VirtAddr) -> isize {
+        let vpn: VirtPageNum = (addr.0 / PAGE_SIZE).into();
+        let offset = addr.0 & ((0x1 << PAGE_SIZE_BITS) - 1);
+        println!("kernel: try to read byte: vpn = {:#x}, offset = {:#x}", vpn.0, offset);
+        if let Some(pte) = self.find_pte(vpn) {
+            println!("kernel: find pte: {:#x} -> {:#x}", vpn.0, pte.ppn().0);
+            if !pte.readable() {
+                return -1;
+            } else {
+                return pte.ppn().get_bytes_array()[offset] as isize
+            }
+        } else {
+            return -1;
+        }
     }
 }
 
