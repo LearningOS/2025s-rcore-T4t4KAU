@@ -137,7 +137,7 @@ pub fn sys_mmap(_start: usize, _len: usize, _prot: usize) -> isize {
 
     let mut perm = MapPermission::U;
     if _prot & (0x1 << 0) != 0 {
-        perm = MapPermission::R;
+        perm = perm | MapPermission::R;
     }
 
     if _prot & (0x1 << 1) != 0 {
@@ -158,7 +158,7 @@ pub fn sys_mmap(_start: usize, _len: usize, _prot: usize) -> isize {
     }
 
     map_memory_pages(_start.into(), page_num, perm);
-    println!("kernel: map virtual pages, start_va = {:#x}, end_va = {:#x}", _start, _start + _len);
+    println!("kernel: map virtual pages, start_va = {:#x}, end_va = {:#x}", _start, _start + page_num * PAGE_SIZE);
 
     0
 }
@@ -174,6 +174,7 @@ pub fn sys_munmap(_start: usize, _len: usize) -> isize {
     }
 
     let page_num = (_len + PAGE_SIZE - 1) / PAGE_SIZE;
+    println!("kernel: try to free page {}", page_num);
 
     // free memory page
     for i in 0..page_num {

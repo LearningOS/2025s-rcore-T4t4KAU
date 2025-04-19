@@ -310,10 +310,13 @@ impl MemorySet {
     /// map one virtual page
     pub fn map_one_page(&mut self, _start: VirtAddr, _perm: MapPermission) {
         let _end: VirtAddr = (_start.0 + PAGE_SIZE).into();
+        println!("kernel: allocate one page: _start = {:#x}, _end = {:#x}", _start.0, _end.0);
         self.push(
             MapArea::new(_start, _end, MapType::Framed, _perm),
             Some(&[0; PAGE_SIZE])
         );
+
+        self.print_framed_pages();
     }
 
     /// unmap one virtual page
@@ -323,6 +326,8 @@ impl MemorySet {
                 self.areas[i].unmap_one(&mut self.page_table, vpn);
             }
         }
+
+        self.print_framed_pages();
     }
 
     /// check virtual page if mapped
@@ -338,6 +343,26 @@ impl MemorySet {
     /// read one byte from page
     pub fn read_byte_from_page(&self, addr: VirtAddr) -> isize {
         self.page_table.read_byte_from_page(addr)
+    }
+
+    ///
+    pub fn print_framed_pages(&self) {
+        println!("----------------------PageTable-----------------------");
+
+        for i in 0..self.areas.len() {
+            let data_frames = self.areas[i].data_frames.iter().clone();
+            
+            if data_frames.len() == 0 {
+                continue;
+            }
+
+            for (key, val) in data_frames {
+                let pte_flag_bits = self.translate(*key).unwrap().flags().bits();
+                println!("{:#x} -> {:#x} perm: {:#x} pte_flags: {:#x}", key.0, val.ppn.0, self.areas[i].map_perm, pte_flag_bits);
+            }
+        }
+
+        println!("------------------------------------------------------");
     }
 
 }
@@ -377,6 +402,8 @@ impl MapArea {
                 self.data_frames.insert(vpn, frame);
             }
         }
+
+        // map_perm -> pte_flags
         let pte_flags = PTEFlags::from_bits(self.map_perm.bits).unwrap();
         page_table.map(vpn, ppn, pte_flags);
     }
