@@ -1,5 +1,4 @@
 //! Process management syscalls
-use core::slice::from_raw_parts;
 
 use crate::{config::{PAGE_SIZE, PAGE_SIZE_BITS}, mm::{check_enough, translated_byte_buffer, MapPermission, VirtPageNum}, task::{change_program_brk, check_page_mapped, check_vpn_readable, check_vpn_writable, current_user_token, exit_current_and_run_next, get_current_syscall_count, map_memory_pages, read_byte_from_page, suspend_current_and_run_next, unmap_one_memory_page, write_byte_to_page}, timer::get_time_us};
 
@@ -31,39 +30,22 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
     trace!("kernel: sys_get_time: _ts = {:#x}, _tz = {:#x}", _ts as usize, _tz);
 
     let us = get_time_us();
-    let _ts_ptr = _ts as *const u8;
-    let mut bytes_vec = translated_byte_buffer(current_user_token(), _ts_ptr, _tz);
-    
-    let tv = &mut TimeVal {
+    let tv_size = core::mem::size_of::<TimeVal>();
+    let dst_vec = translated_byte_buffer(current_user_token(), _ts as *const u8, tv_size);
+
+    let ref time_val = TimeVal {
         sec: us / 1_000_000,
-        usec: us % 1_1000_1000,
+        usec: us % 1_000_000,
     };
 
-    // println!("kernel get time: sec = {:#x} usec = {:#x}", tv.sec, tv.usec);
-
-    let tv_ptr = tv as *const TimeVal as *const u8;
-    let tv_bytes: &[u8] = unsafe {
-        from_raw_parts(tv_ptr, _tz)
-    };
-    
-    if bytes_vec.len() == 1 {
-        assert_eq!(bytes_vec[0].len(), tv_bytes.len());
-        for i in 0..tv_bytes.len() {
-            bytes_vec[0][i] = tv_bytes[i]
+    let src_ptr = time_val as *const TimeVal;
+    for (idx, dst) in dst_vec.into_iter().enumerate() {
+        let unit_len = dst.len();
+        unsafe {
+            dst.copy_from_slice(core::slice::from_raw_parts(
+                src_ptr.wrapping_byte_add(idx * unit_len) as *const u8, unit_len));
         }
     }
-
-    if bytes_vec.len() == 2 {
-        assert_eq!(bytes_vec[0].len() + bytes_vec[1].len(), tv_bytes.len());
-        for i in 0..bytes_vec[0].len() {
-            bytes_vec[0][i] = tv_bytes[i];
-        }
-
-        for i in 0..bytes_vec[1].len() {
-            bytes_vec[1][i] = tv_bytes[i];
-        }
-    }
-
 
     0
 }
