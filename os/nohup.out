@@ -1,0 +1,3 @@
+make: Entering directory '/root/2025s-rcore-T4t4KAU/os'
+Makefile:84: *** missing separator.  Stop.
+make: Leaving directory '/root/2025s-rcore-T4t4KAU/os'
