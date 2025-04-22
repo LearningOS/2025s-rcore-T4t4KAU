@@ -5,6 +5,7 @@
 //! and the replacement and transfer of control flow of different applications are executed.
 
 use super::__switch;
+use super::manager::fetch_task_by_stride;
 use super::{fetch_task, TaskStatus};
 use super::{TaskContext, TaskControlBlock};
 use crate::sync::UPSafeCell;
@@ -56,6 +57,31 @@ pub fn run_tasks() {
     loop {
         let mut processor = PROCESSOR.exclusive_access();
         if let Some(task) = fetch_task() {
+            let idle_task_cx_ptr = processor.get_idle_task_cx_ptr();
+            // access coming task TCB exclusively
+            let mut task_inner = task.inner_exclusive_access();
+            let next_task_cx_ptr = &task_inner.task_cx as *const TaskContext;
+            task_inner.task_status = TaskStatus::Running;
+            // release coming task_inner manually
+            drop(task_inner);
+            // release coming task TCB manually
+            processor.current = Some(task);
+            // release processor manually
+            drop(processor);
+            unsafe {
+                __switch(idle_task_cx_ptr, next_task_cx_ptr);
+            }
+        } else {
+            warn!("no tasks available in run_tasks");
+        }
+    }
+}
+
+#[allow(unused)]
+pub fn run_tasks_by_stride() {
+    loop {
+        let mut processor = PROCESSOR.exclusive_access();
+        if let Some(task) = fetch_task_by_stride() {
             let idle_task_cx_ptr = processor.get_idle_task_cx_ptr();
             // access coming task TCB exclusively
             let mut task_inner = task.inner_exclusive_access();

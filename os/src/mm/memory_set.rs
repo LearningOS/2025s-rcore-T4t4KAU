@@ -300,6 +300,38 @@ impl MemorySet {
             false
         }
     }
+    
+    /// map virtual pages
+    pub fn map_pages(&mut self, _start: VirtAddr, page_num: usize, _perm: MapPermission) {
+        for i in 0..page_num {
+            let _start = _start.0 + i * PAGE_SIZE;
+            self.map_one_page(_start.into(), _perm);
+        }
+    }
+
+    /// map one virtual page
+    pub fn map_one_page(&mut self, _start: VirtAddr, _perm: MapPermission) {
+        let _end: VirtAddr = (_start.0 + PAGE_SIZE).into();
+        debug!("kernel: allocate one page, _start = {:#x}, _end = {:#x}", _start.0, _end.0);
+        self.push(
+            MapArea::new(_start, _end, MapType::Framed, _perm),
+            Some(&[0; PAGE_SIZE]),
+        );
+    }
+
+    /// unmap one virtual page
+    pub fn unmap_one_page(&mut self, vpn: VirtPageNum) {
+        for i in 0..self.areas.len() {
+            if self.areas[i].data_frames.contains_key(&vpn) {
+                self.areas[i].unmap_one(&mut self.page_table, vpn);
+            }
+        }
+    }
+
+    /// check virtual page if mapped
+    pub fn check_vpn_mapped(&self, vpn: VirtPageNum) -> bool {
+        self.page_table.check_vpn_mapped(vpn)
+    }
 }
 /// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {
