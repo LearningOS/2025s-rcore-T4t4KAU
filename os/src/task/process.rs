@@ -49,6 +49,14 @@ pub struct ProcessControlBlockInner {
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
     /// condvar list
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
+
+    pub mutex_max: [usize; 128],
+    pub mutex_alloc: [usize; 128],
+    pub mutex_available: [usize; 128],
+
+    pub semaphore_max: [usize; 128],
+    pub semaphore_alloc: [usize; 128],
+    pub semaphore_available: [usize; 128],
 }
 
 impl ProcessControlBlockInner {
@@ -119,6 +127,14 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+
+                    mutex_max: [0; 128],
+                    mutex_alloc: [0; 128],
+                    mutex_available: [0; 128],
+
+                    semaphore_alloc: [0; 128],
+                    semaphore_max: [0; 128],
+                    semaphore_available: [0; 128],
                 })
             },
         });
@@ -245,6 +261,14 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+
+                    mutex_max: [0; 128],
+                    mutex_alloc: [0; 128],
+                    mutex_available: [0; 128],
+
+                    semaphore_alloc: [0; 128],
+                    semaphore_max: [0; 128],
+                    semaphore_available: [0; 128],
                 })
             },
         });
