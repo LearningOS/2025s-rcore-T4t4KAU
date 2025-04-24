@@ -17,8 +17,10 @@ pub fn sys_thread_create(entry: usize, arg: usize) -> isize {
             .unwrap()
             .tid
     );
+
     let task = current_task().unwrap();
     let process = task.process.upgrade().unwrap();
+
     // create a new thread
     let new_task = Arc::new(TaskControlBlock::new(
         Arc::clone(&process),
@@ -29,6 +31,7 @@ pub fn sys_thread_create(entry: usize, arg: usize) -> isize {
             .ustack_base,
         true,
     ));
+
     // add new task to scheduler
     add_task(Arc::clone(&new_task));
     let new_task_inner = new_task.inner_exclusive_access();
@@ -50,6 +53,7 @@ pub fn sys_thread_create(entry: usize, arg: usize) -> isize {
         trap_handler as usize,
     );
     (*new_task_trap_cx).x[10] = arg;
+
     new_task_tid as isize
 }
 /// get current thread id syscall

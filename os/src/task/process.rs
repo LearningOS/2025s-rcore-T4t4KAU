@@ -14,6 +14,7 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefMut;
+use alloc::collections::BTreeMap;
 
 /// Process Control Block
 pub struct ProcessControlBlock {
@@ -49,6 +50,16 @@ pub struct ProcessControlBlockInner {
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
     /// condvar list
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
+
+    pub mutex_max: Vec<usize>,
+    pub mutex_alloc: BTreeMap<usize, Vec<usize>>,
+    pub mutex_available: Vec<usize>,
+
+    pub semaphore_max: Vec<usize>,
+    pub semaphore_alloc: BTreeMap<usize, Vec<usize>>,
+    pub semaphore_available: Vec<usize>,
+
+    pub enable: bool,
 }
 
 impl ProcessControlBlockInner {
@@ -81,6 +92,180 @@ impl ProcessControlBlockInner {
     /// get a task with tid in this process
     pub fn get_task(&self, tid: usize) -> Arc<TaskControlBlock> {
         self.tasks[tid].as_ref().unwrap().clone()
+    }
+
+    pub fn check_mutex_deadlock(&self, mutex_id: usize) -> bool {
+        let thread_count = self.mutex_alloc.len();
+        if thread_count == 0 {
+            return true;
+        }
+
+        let mut finish_vec = Vec::new();
+        finish_vec.resize(thread_count, false);
+        
+
+        let mut work_vec = self.mutex_available.clone();
+        let mut finish_count = 0;
+
+        loop {
+            let mut flag = false;
+            let mut index: isize = -1;
+            for (i, _) in self.mutex_alloc.iter().enumerate() {
+                if !finish_vec[i] && work_vec[mutex_id] >= 1 {
+                    index = i as isize;
+                    flag = true;
+                    break;
+                }
+            }
+
+            if !flag {
+                break;
+            }
+
+            if index >= 0 {
+                let index = index as usize;
+                finish_count += 1;
+                work_vec[mutex_id] += self.mutex_alloc[&index][mutex_id];
+                finish_vec[index] = true;
+            }
+        }
+
+        println!("kernel: check sem deadlock: sem_id = {}, finish_count = {}, thread_count = {}", mutex_id, finish_count, thread_count);
+
+        finish_count == thread_count
+    }
+
+    pub fn print_semaphore_matrix(&self) {
+        let alloc_map = self.semaphore_alloc.clone();
+        let max_vec = self.semaphore_max.clone();
+        let avail_vec = self.semaphore_available.clone();
+
+        println!("==========================MATRIX===============================");
+        println!("---------------------ALLOC--------------------");
+        for (_, (tid, alloc_vec)) in alloc_map.iter().enumerate() {
+            print!("{} | ", tid);
+            for i in 0..alloc_vec.len() {
+                print!("{} ", alloc_vec[i]);
+            }
+            println!("");
+        }
+        println!("----------------------------------------------");
+
+        println!("---------------------MAX--------------------");
+        for (_, x) in max_vec.iter().enumerate() {
+            print!("{} ", x);
+        }
+        println!("");
+        println!("----------------------------------------------");
+
+        println!("---------------------AVAIL--------------------");
+        for (_, x) in avail_vec.iter().enumerate() {
+            print!("{} ", x);
+        }
+        println!("");
+        println!("----------------------------------------------");
+
+        println!("===============================================================");
+    }
+
+    pub fn dec_semaphore_alloc(&mut self, semaphore_id: usize, task_id: usize) {
+
+        let mut alloc_vec = self.semaphore_alloc[&task_id].clone();
+
+        println!("kernel: task {} attempt to decrease allocation of {}, previous allocation = {}", task_id, semaphore_id, alloc_vec[semaphore_id]);
+
+        if alloc_vec[semaphore_id] == 0 {
+            return;
+        }
+
+        alloc_vec[semaphore_id] -= 1;
+
+
+        println!("kernel: task {} has decreased {} allocation to {}", task_id, semaphore_id, alloc_vec[semaphore_id]);
+        self.semaphore_alloc.insert(task_id, alloc_vec);
+    }
+
+    pub fn dec_semaphore_available(&mut self, semaphore_id: usize) {
+
+        println!("kernel: attempt to decrease available of {}, previous allocation = {}", semaphore_id, self.semaphore_available[semaphore_id]);
+
+        if self.semaphore_available[semaphore_id] > 0 {
+            self.semaphore_available[semaphore_id] -= 1;
+        }
+
+        println!("kernel: task has decreased {} allocation to {}", semaphore_id, self.semaphore_available[semaphore_id]);
+    }
+
+    pub fn inc_semaphore_alloc(&mut self, semaphore_id: usize, task_id: usize) {
+
+        let mut alloc_vec = self.semaphore_alloc[&task_id].clone();
+
+        println!("kernel: task {} attempt to increase allocation of {}, previous allocation = {}", task_id, semaphore_id, alloc_vec[semaphore_id]);
+
+        alloc_vec[semaphore_id] += 1;
+
+        println!("kernel: task {} has increased {} allocation to {}", task_id, semaphore_id, alloc_vec[semaphore_id]);
+        self.semaphore_alloc.insert(task_id, alloc_vec);
+    }
+
+    pub fn inc_semaphore_available(&mut self, semaphore_id: usize) {
+        println!("kernel: attempt to increase available of {}, previous allocation = {}", semaphore_id, self.semaphore_available[semaphore_id]);
+
+        if self.semaphore_available[semaphore_id] < self.semaphore_max[semaphore_id] {
+            self.semaphore_available[semaphore_id] += 1;
+        }
+
+        println!("kernel: task has increased {} allocation to {}", semaphore_id, self.semaphore_available[semaphore_id]);
+    }
+
+    pub fn check_semaphore_deadlock(&self, semaphore_id: usize) -> bool {
+        self.print_semaphore_matrix();
+
+        let thread_count = self.semaphore_alloc.len();
+        if thread_count == 0 {
+            return true;
+        }
+
+        let mut finish_vec = Vec::new();
+        finish_vec.resize(thread_count, false);
+
+        let mut work_vec = self.semaphore_available.clone();
+        let mut finish_count = 0;
+
+        loop {
+            let mut flag = false;
+            let mut index: isize = -1;
+            for (i, _) in self.semaphore_alloc.iter().enumerate() {
+                if !finish_vec[i] && work_vec[semaphore_id] >= 1 {
+                    index = i as isize;
+                    flag = true;
+                    break;
+                }
+            }
+
+            if !flag {
+                break;
+            }
+
+            if index >= 0 {
+                let index = index as usize;
+                finish_count += 1;
+                work_vec[semaphore_id] += self.semaphore_alloc[&index][semaphore_id];
+                finish_vec[index] = true;
+            }
+        }
+
+        println!("kernel: check sem deadlock: sem_id = {}, finish_count = {}, thread_count = {}", semaphore_id, finish_count, thread_count);
+
+        finish_count == thread_count
+    }
+
+    pub fn enable_deadlock_detect(&mut self) {
+        self.enable = true;
+    }
+
+    pub fn disable_deadlock_detect(&mut self) {
+        self.enable = false;
     }
 }
 
@@ -119,6 +304,13 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    mutex_max: Vec::new(),
+                    mutex_alloc: BTreeMap::new(),
+                    mutex_available: Vec::new(),
+                    semaphore_alloc: BTreeMap::new(),
+                    semaphore_max: Vec::new(),
+                    semaphore_available: Vec::new(),
+                    enable: false,
                 })
             },
         });
@@ -245,6 +437,13 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    mutex_max: Vec::new(),
+                    mutex_alloc: BTreeMap::new(),
+                    mutex_available: Vec::new(),
+                    semaphore_max: Vec::new(),
+                    semaphore_available: Vec::new(),
+                    semaphore_alloc: BTreeMap::new(),
+                    enable: false,
                 })
             },
         });
