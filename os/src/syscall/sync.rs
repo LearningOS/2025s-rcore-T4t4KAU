@@ -224,7 +224,7 @@ pub fn sys_semaphore_down(sem_id: usize) -> isize {
     //     return -0xDEAD;
     // }
 
-    if !process_inner.check_semaphore_deadlock2() {
+    if !process_inner.check_semaphore_deadlock2(tid, sem_id) {
         return -0xDEAD;
     }
 

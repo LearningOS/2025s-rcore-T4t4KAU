@@ -132,7 +132,7 @@ impl ProcessControlBlockInner {
         }
     }
 
-    pub fn check_semaphore_deadlock2(&self) -> bool {
+    pub fn check_semaphore_deadlock2(&self, task_id: usize, sem_id: usize) -> bool {
         println!("kernel: try check sem deadlock");
 
         let thread_count = self.thread_count();
@@ -140,10 +140,8 @@ impl ProcessControlBlockInner {
         let mut work_vec = self.semaphore_available.clone();
         
         let sem_count = self.semaphore_list.len();
-
         let mut sem_need = vec![vec![0; sem_count]; thread_count];
         
-
         print!("| ");
         for i in 0..sem_count {
             print!("{} ", work_vec[i]);
@@ -153,12 +151,15 @@ impl ProcessControlBlockInner {
 
 
         for i in 0..self.semaphore_list.len() {
+            print!("{} |", i);
             if let Some(sem) = &self.semaphore_list[i] {
                 let waits = sem.inner.exclusive_access().wait_queue.clone();
                 for (_, x) in waits.iter().enumerate() {
+                    println!("{} ", x.get_task_id());
                     sem_need[x.get_task_id()][i] += 1;
                 }
             }
+            println!("|")
         }
 
         for i in 0..sem_need.len() {
@@ -168,6 +169,8 @@ impl ProcessControlBlockInner {
             }
             println!("|")
         }
+
+        sem_need[task_id][sem_id] += 1;
 
         loop {
             let mut flag = false;
