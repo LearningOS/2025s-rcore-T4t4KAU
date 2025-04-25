@@ -49,10 +49,15 @@ pub fn sys_mutex_create(blocking: bool) -> isize {
         .map(|(id, _)| id)
     {
         process_inner.mutex_list[id] = mutex;
+        process_inner.mutex_max[id] = 1;
+        process_inner.mutex_available[id] = 1;
         id as isize
     } else {
         process_inner.mutex_list.push(mutex);
-        process_inner.mutex_list.len() as isize - 1
+        let id = process_inner.mutex_list.len() - 1;
+        process_inner.mutex_max[id] = 1;
+        process_inner.mutex_available[id] = 1;
+        id as isize
     }
 }
 /// mutex lock syscall
@@ -69,8 +74,17 @@ pub fn sys_mutex_lock(mutex_id: usize) -> isize {
             .tid
     );
     let process = current_process();
-    let process_inner = process.inner_exclusive_access();
+    let mut process_inner = process.inner_exclusive_access();
+
+    if !process_inner.check_mutex_deadlock(mutex_id) {
+        return -0xDEAD;
+    }
+
     let mutex = Arc::clone(process_inner.mutex_list[mutex_id].as_ref().unwrap());
+
+    process_inner.mutex_alloc[mutex_id] = 1;
+    process_inner.mutex_available[mutex_id] = 0;
+
     drop(process_inner);
     drop(process);
     mutex.lock();
@@ -90,8 +104,12 @@ pub fn sys_mutex_unlock(mutex_id: usize) -> isize {
             .tid
     );
     let process = current_process();
-    let process_inner = process.inner_exclusive_access();
+    let mut process_inner = process.inner_exclusive_access();
     let mutex = Arc::clone(process_inner.mutex_list[mutex_id].as_ref().unwrap());
+
+    process_inner.mutex_alloc[mutex_id] = 0;
+    process_inner.mutex_available[mutex_id] = 1;
+
     drop(process_inner);
     drop(process);
     mutex.unlock();
@@ -246,6 +264,16 @@ pub fn sys_condvar_wait(condvar_id: usize, mutex_id: usize) -> isize {
 ///
 /// YOUR JOB: Implement deadlock detection, but might not all in this syscall
 pub fn sys_enable_deadlock_detect(_enabled: usize) -> isize {
-    trace!("kernel: sys_enable_deadlock_detect NOT IMPLEMENTED");
-    -1
+    let process = current_process();
+    let mut process_inner = process.inner_exclusive_access();
+
+    if _enabled == 0 {
+        process_inner.enable_check = false;
+    } else if _enabled == 1 {
+        process_inner.enable_check = true;
+    } else {
+        return -1;
+    }
+
+    return 0;
 }

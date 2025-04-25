@@ -57,6 +57,8 @@ pub struct ProcessControlBlockInner {
     pub semaphore_max: [usize; 128],
     pub semaphore_alloc: [usize; 128],
     pub semaphore_available: [usize; 128],
+
+    pub enable_check: bool,
 }
 
 impl ProcessControlBlockInner {
@@ -89,6 +91,21 @@ impl ProcessControlBlockInner {
     /// get a task with tid in this process
     pub fn get_task(&self, tid: usize) -> Arc<TaskControlBlock> {
         self.tasks[tid].as_ref().unwrap().clone()
+    }
+
+    pub fn check_mutex_deadlock(&self, mutex_id: usize) -> bool {
+        if !self.enable_check {
+            return true;
+        }
+
+        assert!(mutex_id < self.mutex_max.len());
+        
+        let work_vec = self.mutex_available.clone();
+        if work_vec[mutex_id] >= 1 {
+            return true;
+        } else {
+            return false;
+        }
     }
 }
 
@@ -135,6 +152,8 @@ impl ProcessControlBlock {
                     semaphore_alloc: [0; 128],
                     semaphore_max: [0; 128],
                     semaphore_available: [0; 128],
+
+                    enable_check: false,
                 })
             },
         });
@@ -269,6 +288,8 @@ impl ProcessControlBlock {
                     semaphore_alloc: [0; 128],
                     semaphore_max: [0; 128],
                     semaphore_available: [0; 128],
+
+                    enable_check: false,
                 })
             },
         });
