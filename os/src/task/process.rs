@@ -54,9 +54,9 @@ pub struct ProcessControlBlockInner {
     pub mutex_alloc: [usize; 128],
     pub mutex_available: [usize; 128],
 
-    pub semaphore_max: [usize; 128],
-    pub semaphore_alloc: [usize; 128],
-    pub semaphore_available: [usize; 128],
+    pub semaphore_max: [isize; 128],
+    pub semaphore_alloc: [[isize; 128]; 128],
+    pub semaphore_available: [isize; 128],
 
     pub enable_check: bool,
 }
@@ -99,7 +99,7 @@ impl ProcessControlBlockInner {
         }
 
         assert!(mutex_id < self.mutex_max.len());
-        
+
         let work_vec = self.mutex_available.clone();
         if work_vec[mutex_id] >= 1 {
             return true;
@@ -107,7 +107,112 @@ impl ProcessControlBlockInner {
             return false;
         }
     }
+    
+    pub fn check_semaphore_deadlock(&self, semaphore_id: usize, task_id: usize) -> bool {
+        if !self.enable_check {
+            return true;
+        }
+
+        println!(
+            "kernel: task {} try to check, sem_id = {}",
+            task_id, semaphore_id
+        );
+
+        assert!(semaphore_id < self.semaphore_max.len());
+
+        let work_vec = self.semaphore_available.clone();
+
+        println!("kernel: check avilable semaphore, sem_num = {}", work_vec[semaphore_id]);
+
+        if work_vec[semaphore_id] >= 1 {
+            println!("kernel: allow avilable semaphore, sem_num = {}", work_vec[semaphore_id]);
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    pub fn check_semaphore_deadlock2(&self) -> bool {
+        println!("kernel: try check sem deadlock");
+
+        let thread_count = self.thread_count();
+        let mut finish_vec = vec![false; thread_count];
+        let mut work_vec = self.semaphore_available.clone();
+        
+        let sem_count = self.semaphore_list.len();
+
+        let mut sem_need = vec![vec![0; sem_count]; thread_count];
+        
+
+        print!("| ");
+        for i in 0..sem_count {
+            print!("{} ", work_vec[i]);
+        }
+
+        println!("|");
+
+
+        for i in 0..self.semaphore_list.len() {
+            if let Some(sem) = &self.semaphore_list[i] {
+                let waits = sem.inner.exclusive_access().wait_queue.clone();
+                for (_, x) in waits.iter().enumerate() {
+                    sem_need[x.get_task_id()][i] += 1;
+                }
+            }
+        }
+
+        for i in 0..sem_need.len() {
+            print!("{} | ", i);
+            for j in 0..sem_need[i].len() {
+                print!("{} ", sem_need[i][j]);
+            }
+            println!("|")
+        }
+
+        loop {
+            let mut flag = false;
+            let mut index: usize = 0;
+            for i in 0..finish_vec.len() {
+                if finish_vec[i] {
+                    continue;
+                }
+
+                let mut vaild = true;
+                for j in 0..sem_count {
+                    if work_vec[j] < sem_need[i][j] {
+                        vaild = false;
+                        break;
+                    }
+                }
+
+                if vaild {
+                    index = i;
+                    flag = true;
+                }
+            }
+
+            if !flag {
+                break;
+            }
+
+            finish_vec[index] = true;
+            for j in 0..sem_count {
+                work_vec[j] += self.semaphore_alloc[index][j];
+            }
+        }
+
+        for i in 0..finish_vec.len() {
+            if !finish_vec[i] {
+                println!("kernel: avoid deadlock");
+                return false;
+            }
+        }
+
+        println!("kernel: no deadlock");
+        return true;
+    }
 }
+
 
 impl ProcessControlBlock {
     /// inner_exclusive_access
@@ -149,7 +254,7 @@ impl ProcessControlBlock {
                     mutex_alloc: [0; 128],
                     mutex_available: [0; 128],
 
-                    semaphore_alloc: [0; 128],
+                    semaphore_alloc: [[0; 128]; 128],
                     semaphore_max: [0; 128],
                     semaphore_available: [0; 128],
 
@@ -285,7 +390,7 @@ impl ProcessControlBlock {
                     mutex_alloc: [0; 128],
                     mutex_available: [0; 128],
 
-                    semaphore_alloc: [0; 128],
+                    semaphore_alloc: [[0; 128]; 128],
                     semaphore_max: [0; 128],
                     semaphore_available: [0; 128],
 
